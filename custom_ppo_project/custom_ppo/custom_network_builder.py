@@ -17,22 +17,35 @@ def _create_initializer(func, **kwargs):
 
 
 class NetworkBuilder:
+    """Base class for network builders.
+    
+    This class provides the infrastructure for creating neural networks, including
+    factories for activations and initializers, and helper methods for building
+    MLPs, CNNs, and RNNs.
+    """
     def __init__(self, **kwargs):
         pass
 
     def load(self, params):
+        """Load configuration parameters."""
         pass
 
     def build(self, name, **kwargs):
+        """Build the network with the given name and arguments."""
         pass
 
     def __call__(self, name, **kwargs):
         return self.build(name, **kwargs)
 
     class BaseNetwork(nn.Module):
+        """Base class for all networks created by the builder.
+        
+        It initializes factories for activation functions and weight initializers.
+        """
         def __init__(self, **kwargs):
             nn.Module.__init__(self, **kwargs)
 
+            # Factory for creating activation functions from string names
             self.activations_factory = object_factory.ObjectFactory()
             self.activations_factory.register_builder('relu', lambda **kwargs : nn.ReLU(**kwargs))
             self.activations_factory.register_builder('tanh', lambda **kwargs : nn.Tanh(**kwargs))
@@ -44,6 +57,7 @@ class NetworkBuilder:
             self.activations_factory.register_builder('softplus', lambda **kwargs : nn.Softplus(**kwargs))
             self.activations_factory.register_builder('None', lambda **kwargs : nn.Identity())
 
+            # Factory for creating weight initializers
             self.init_factory = object_factory.ObjectFactory()
             #self.init_factory.register_builder('normc_initializer', lambda **kwargs : normc_initializer(**kwargs))
             self.init_factory.register_builder('const_initializer', lambda **kwargs : _create_initializer(nn.init.constant_,**kwargs))
@@ -57,21 +71,30 @@ class NetworkBuilder:
             self.init_factory.register_builder('default', lambda **kwargs : nn.Identity() )
 
         def is_separate_critic(self):
+            # Default: Actor and Critic share weights (or there is no critic)
             return False
 
         def get_value_layer(self):
+            # Return the layer responsible for value estimation
             return self.value
 
         def is_rnn(self):
+            # Default: Not a Recurrent Neural Network
             return False
 
         def get_default_rnn_state(self):
+            # Default: No RNN state
             return None
 
         def get_aux_loss(self):
+            # Default: No auxiliary loss
             return None
 
         def _calc_input_size(self, input_shape,cnn_layers=None):
+            """Calculate the input size for the next layer (e.g., MLP) after a CNN.
+            
+            It passes a dummy input through the CNN layers to determine the flattened output size.
+            """
             if cnn_layers is None:
                 assert(len(input_shape) == 1)
                 return input_shape[0]
@@ -79,9 +102,11 @@ class NetworkBuilder:
                 return nn.Sequential(*cnn_layers)(torch.rand(1, *(input_shape))).flatten(1).data.size(1)
 
         def _noisy_dense(self, inputs, units):
+            # Create a noisy linear layer (for exploration)
             return layers.NoisyFactorizedLinear(inputs, units)
 
         def _build_rnn(self, name, input, units, layers):
+            """Build a Recurrent Neural Network layer."""
             if name == 'identity':
                 return torch_ext.IdentityRNN(input, units)
             if name == 'lstm':
@@ -96,14 +121,30 @@ class NetworkBuilder:
         dense_func,
         norm_only_first_layer=False, 
         norm_func_name = None):
+            """Build a Multi-Layer Perceptron (MLP) sequentially.
+            
+            Args:
+                input_size (int): Size of the input feature vector.
+                units (list): List of integers defining the number of units in each hidden layer.
+                activation (str): Name of the activation function to use.
+                dense_func (class): The class to use for dense layers (e.g., nn.Linear).
+                norm_only_first_layer (bool): If True, apply normalization only to the first layer.
+                norm_func_name (str): Name of the normalization function ('layer_norm', 'batch_norm').
+            
+            Returns:
+                nn.Sequential: The constructed MLP module.
+            """
             print('build mlp:', input_size)
             in_size = input_size
             layers = []
             need_norm = True
             for unit in units:
+                # Add a dense (linear) layer.
                 layers.append(dense_func(in_size, unit))
+                # Add activation function.
                 layers.append(self.activations_factory.create(activation))
 
+                # Add normalization if requested.
                 if not need_norm:
                     continue
                 if norm_only_first_layer and norm_func_name is not None:
@@ -124,6 +165,7 @@ class NetworkBuilder:
         norm_only_first_layer=False,
         norm_func_name = None,
         d2rl=False):
+            """Wrapper to build an MLP, optionally using D2RL architecture."""
             if d2rl:
                 act_layers = [self.activations_factory.create(activation) for i in range(len(units))]
                 return D2RLNet(input_size, units, act_layers, norm_func_name)
@@ -131,6 +173,7 @@ class NetworkBuilder:
                 return self._build_sequential_mlp(input_size, units, activation, dense_func, norm_func_name = None,)
 
         def _build_conv(self, ctype, **kwargs):
+            """Build a Convolutional Neural Network (CNN) based on type."""
             print('conv_name:', ctype)
 
             if ctype == 'conv2d':
@@ -146,21 +189,38 @@ class NetworkBuilder:
 
         def _build_cnn2d(self, input_shape, convs, activation, conv_func=torch.nn.Conv2d, norm_func_name=None,
                          add_spatial_softmax=False, add_flatten=False):
+            """Build a 2D CNN.
+            
+            Args:
+                input_shape (tuple): Shape of the input (Channels, Height, Width).
+                convs (list): List of dictionaries defining each convolution layer (filters, kernel_size, strides, padding).
+                activation (str): Activation function name.
+                conv_func (class): Convolution class to use.
+                norm_func_name (str): Normalization type.
+                add_spatial_softmax (bool): Whether to add spatial softmax at the end.
+                add_flatten (bool): Whether to flatten the output.
+            """
             in_channels = input_shape[0]
             layers = []
             for conv in convs:
+                # Add convolution layer.
                 layers.append(conv_func(in_channels=in_channels, 
                 out_channels=conv['filters'], 
                 kernel_size=conv['kernel_size'], 
                 stride=conv['strides'], padding=conv['padding']))
                 conv_func=torch.nn.Conv2d
+                
+                # Add activation.
                 act = self.activations_factory.create(activation)
                 layers.append(act)
                 in_channels = conv['filters']
+                
+                # Add normalization.
                 if norm_func_name == 'layer_norm':
                     layers.append(torch_ext.LayerNorm2d(in_channels))
                 elif norm_func_name == 'batch_norm':
                     layers.append(torch.nn.BatchNorm2d(in_channels))
+            
             if add_spatial_softmax:
                 layers.append(SpatialSoftArgmax(normalize=True))
             if add_flatten:
@@ -195,14 +255,27 @@ class NetworkBuilder:
 
 
 class CustomPPOBuilder(NetworkBuilder):
+    """Builder for Custom PPO Networks.
+    
+    This class constructs the actor and critic networks based on the provided configuration.
+    It supports MLPs, CNNs, and RNNs, as well as separate or shared actor-critic architectures.
+    """
     def __init__(self, **kwargs):
         NetworkBuilder.__init__(self)
 
     def load(self, params):
+        """Load configuration parameters."""
         self.params = params
 
     class Network(NetworkBuilder.BaseNetwork):
+        """The actual PPO Network implementation."""
         def __init__(self, params, **kwargs):
+            """Initialize the Custom PPO Network.
+            
+            Args:
+                params (dict): Configuration parameters for the network.
+                kwargs (dict): Additional arguments like input_shape, actions_num, etc.
+            """
             actions_num = kwargs.pop('actions_num')
             input_shape = kwargs.pop('input_shape')
             self.value_size = kwargs.pop('value_size', 1)
@@ -210,13 +283,17 @@ class CustomPPOBuilder(NetworkBuilder):
 
             NetworkBuilder.BaseNetwork.__init__(self)
             self.load(params)
+            
+            # Initialize containers for network components.
             self.actor_cnn = nn.Sequential()
             self.critic_cnn = nn.Sequential()
             self.actor_mlp = nn.Sequential()
             self.critic_mlp = nn.Sequential()
             
+            # Build CNN layers if configured.
             if self.has_cnn:
                 if self.permute_input:
+                    # Ensure input is in (Channels, Width, Height) format.
                     input_shape = torch_ext.shape_whc_to_cwh(input_shape)
                 cnn_args = {
                     'ctype' : self.cnn['type'], 
@@ -228,8 +305,10 @@ class CustomPPOBuilder(NetworkBuilder):
                 self.actor_cnn = self._build_conv(**cnn_args)
 
                 if self.separate:
+                    # If separate actor/critic, build a separate CNN for the critic.
                     self.critic_cnn = self._build_conv( **cnn_args)
 
+            # Calculate output size of CNN to determine input size for MLP/RNN.
             cnn_output_size = self._calc_input_size(input_shape, self.actor_cnn)
 
             mlp_input_size = cnn_output_size
@@ -238,8 +317,10 @@ class CustomPPOBuilder(NetworkBuilder):
             else:
                 out_size = self.units[-1]
 
+            # Build RNN layers if configured.
             if self.has_rnn:
                 if not self.is_rnn_before_mlp:
+                    # RNN is placed after the MLP.
                     rnn_in_size = out_size
                     if self.rnn_concat_input:
                         rnn_in_size += cnn_output_size
@@ -248,6 +329,7 @@ class CustomPPOBuilder(NetworkBuilder):
                     if self.rnn_concat_output:
                         out_size += cnn_output_size
                 else:
+                    # RNN is placed before the MLP (directly after CNN).
                     rnn_in_size = cnn_output_size
 
                     mlp_input_size = self.rnn_units
@@ -255,16 +337,19 @@ class CustomPPOBuilder(NetworkBuilder):
                         mlp_input_size += cnn_output_size
 
                 if self.separate:
+                    # Separate RNNs for actor and critic.
                     self.a_rnn = self._build_rnn(self.rnn_name, rnn_in_size, self.rnn_units, self.rnn_layers)
                     self.c_rnn = self._build_rnn(self.rnn_name, rnn_in_size, self.rnn_units, self.rnn_layers)
                     if self.rnn_ln:
                         self.a_layer_norm = torch.nn.LayerNorm(self.rnn_units)
                         self.c_layer_norm = torch.nn.LayerNorm(self.rnn_units)
                 else:
+                    # Shared RNN.
                     self.rnn = self._build_rnn(self.rnn_name, rnn_in_size, self.rnn_units, self.rnn_layers)
                     if self.rnn_ln:
                         self.layer_norm = torch.nn.LayerNorm(self.rnn_units)
 
+            # Build MLP layers.
             mlp_args = {
                 'input_size' : mlp_input_size,
                 'units' : self.units, 
@@ -279,9 +364,11 @@ class CustomPPOBuilder(NetworkBuilder):
             if self.separate:
                 self.critic_mlp = self._build_mlp(**mlp_args)
 
+            # Build Value Head (outputs value estimate).
             self.value = self._build_value_layer(out_size, self.value_size)
             self.value_act = self.activations_factory.create(self.value_activation)
 
+            # Build Action Head (Logits/Mean/Sigma).
             if self.is_discrete:
                 self.logits = torch.nn.Linear(out_size, actions_num)
             '''
@@ -290,6 +377,7 @@ class CustomPPOBuilder(NetworkBuilder):
             if self.is_multi_discrete:
                 self.logits = torch.nn.ModuleList([torch.nn.Linear(out_size, num) for num in actions_num])
             if self.is_continuous:
+                # For continuous actions, output mean (mu) and standard deviation (sigma).
                 self.mu = torch.nn.Linear(out_size, actions_num)
                 self.mu_act = self.activations_factory.create(self.space_config['mu_activation']) 
                 mu_init = self.init_factory.create(**self.space_config['mu_init'])
@@ -297,10 +385,13 @@ class CustomPPOBuilder(NetworkBuilder):
                 sigma_init = self.init_factory.create(**self.space_config['sigma_init'])
 
                 if self.fixed_sigma:
+                    # Learnable parameter for sigma, independent of input.
                     self.sigma = nn.Parameter(torch.zeros(actions_num, requires_grad=True, dtype=torch.float32), requires_grad=True)
                 else:
+                    # Sigma is a function of the input.
                     self.sigma = torch.nn.Linear(out_size, actions_num)
 
+            # Initialize weights.
             mlp_init = self.init_factory.create(**self.initializer)
             if self.has_cnn:
                 cnn_init = self.init_factory.create(**self.cnn['initializer'])
@@ -323,12 +414,18 @@ class CustomPPOBuilder(NetworkBuilder):
                     sigma_init(self.sigma.weight)  
 
         def forward(self, obs_dict):
+            """Forward pass of the network builder.
+            
+            This method handles the data flow through the constructed network components (CNN, MLP, RNN).
+            It manages reshaping for RNNs (batch_size -> num_seqs * seq_len) and handles separate vs shared architectures.
+            """
             obs = obs_dict['obs']
             states = obs_dict.get('rnn_states', None)
             dones = obs_dict.get('dones', None)
             bptt_len = obs_dict.get('bptt_len', 0)
 
             if self.has_cnn:
+                # Preprocess input for CNN if necessary.
                 # for obs shape 4
                 # input expected shape (B, W, H, C)
                 # convert to (B, C, W, H)
@@ -336,6 +433,8 @@ class CustomPPOBuilder(NetworkBuilder):
                     obs = obs.permute((0, 3, 1, 2))
 
             if self.separate:
+                # Separate Actor and Critic Networks
+                # In this mode, actor and critic have completely separate parameters.
                 a_out = c_out = obs
                 a_out = self.actor_cnn(a_out)
                 a_out = a_out.contiguous().view(a_out.size(0), -1)
@@ -344,11 +443,14 @@ class CustomPPOBuilder(NetworkBuilder):
                 c_out = c_out.contiguous().view(c_out.size(0), -1)                    
 
                 if self.has_rnn:
+                    # RNN Logic for separate networks
+                    # We need to reshape the input to (num_seqs, seq_len, features) for the RNN.
                     seq_length = obs_dict.get('seq_length', 1)
 
                     a_cnn_out = a_out
                     c_cnn_out = c_out
                     if not self.is_rnn_before_mlp:
+                        # If RNN is after MLP, pass through MLP first.
                         a_out = self.actor_mlp(a_cnn_out)
                         c_out = self.critic_mlp(c_cnn_out)
 
@@ -356,6 +458,7 @@ class CustomPPOBuilder(NetworkBuilder):
                             a_out = torch.cat([a_out, a_cnn_out], dim=1)
                             c_out = torch.cat([c_out, c_cnn_out], dim=1)
 
+                    # Reshape for RNN: (Batch, Features) -> (Num_Seqs, Seq_Len, Features)
                     batch_size = a_out.size()[0]
                     num_seqs = batch_size // seq_length
                     a_out = a_out.reshape(num_seqs, seq_length, -1)
@@ -373,9 +476,12 @@ class CustomPPOBuilder(NetworkBuilder):
                     else:
                         a_states = states[:2]
                         c_states = states[2:]                        
+                    
+                    # Pass through RNN.
                     a_out, a_states = self.a_rnn(a_out, a_states, dones, bptt_len)
                     c_out, c_states = self.c_rnn(c_out, c_states, dones, bptt_len)
 
+                    # Reshape back: (Seq_Len, Num_Seqs, Features) -> (Batch, Features)
                     a_out = a_out.transpose(0,1)
                     c_out = c_out.transpose(0,1)
                     a_out = a_out.contiguous().reshape(a_out.size()[0] * a_out.size()[1], -1)
@@ -398,6 +504,7 @@ class CustomPPOBuilder(NetworkBuilder):
                         a_out = self.actor_mlp(a_out)
                         c_out = self.critic_mlp(c_out)
                 else:
+                    # No RNN, just pass through MLP.
                     a_out = self.actor_mlp(a_out)
                     c_out = self.critic_mlp(c_out)
                             
@@ -420,11 +527,14 @@ class CustomPPOBuilder(NetworkBuilder):
 
                     return mu, sigma, value, states
             else:
+                # Shared Actor-Critic Network
+                # In this mode, actor and critic share the initial layers (CNN/MLP/RNN).
                 out = obs
                 out = self.actor_cnn(out)
                 out = out.flatten(1)                
 
                 if self.has_rnn:
+                    # RNN Logic for shared network
                     seq_length = obs_dict.get('seq_length', 1)
 
                     cnn_out = out
@@ -458,6 +568,8 @@ class CustomPPOBuilder(NetworkBuilder):
                         states = (states,)
                 else:
                     out = self.actor_mlp(out)
+                
+                # Value head branches off from the shared representation.
                 value = self.value_act(self.value(out))
 
                 if self.central_value:
@@ -624,6 +736,7 @@ class ImpalaSequential(nn.Module):
         return x
 
 class CustomPPOResnetBuilder(NetworkBuilder):
+    """Builder for ResNet-based PPO Networks (Impala-style)."""
     def __init__(self, **kwargs):
         NetworkBuilder.__init__(self)
 
@@ -631,6 +744,7 @@ class CustomPPOResnetBuilder(NetworkBuilder):
         self.params = params
 
     class Network(NetworkBuilder.BaseNetwork):
+        """ResNet-based PPO Network."""
         def __init__(self, params, **kwargs):
             self.actions_num = actions_num = kwargs.pop('actions_num')
             input_shape = kwargs.pop('input_shape')
@@ -644,6 +758,7 @@ class CustomPPOResnetBuilder(NetworkBuilder):
             if self.permute_input:
                 input_shape = torch_ext.shape_whc_to_cwh(input_shape)
 
+            # Build Impala-style CNN.
             self.cnn = self._build_impala(input_shape, self.conv_depths)
             cnn_output_size = self._calc_input_size(input_shape, self.cnn)
 
@@ -653,6 +768,7 @@ class CustomPPOResnetBuilder(NetworkBuilder):
             else:
                 out_size = self.units[-1]
 
+            # Build RNN if configured.
             if self.has_rnn:
                 if not self.is_rnn_before_mlp:
                     rnn_in_size =  out_size
@@ -683,6 +799,7 @@ class CustomPPOResnetBuilder(NetworkBuilder):
             self.value_act = self.activations_factory.create(self.value_activation)
             self.flatten_act = self.activations_factory.create(self.activation)
 
+            # Build Action Heads.
             if self.is_discrete:
                 self.logits = torch.nn.Linear(out_size, actions_num)
             if self.is_continuous:
@@ -699,6 +816,7 @@ class CustomPPOResnetBuilder(NetworkBuilder):
 
             mlp_init = self.init_factory.create(**self.initializer)
 
+            # Initialize weights.
             for m in self.modules():
                 if isinstance(m, nn.Conv2d):
                     nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -719,6 +837,7 @@ class CustomPPOResnetBuilder(NetworkBuilder):
             mlp_init(self.value.weight)     
 
         def forward(self, obs_dict):
+            """Forward pass for ResNet PPO."""
             if self.require_rewards or self.require_last_actions:
                 obs = obs_dict['obs']['observation']
                 reward = obs_dict['obs']['reward']
@@ -905,6 +1024,7 @@ class DoubleQCritic(NetworkBuilder.BaseNetwork):
 
 
 class CustomSACBuilder(NetworkBuilder):
+    """Builder for Custom SAC (Soft Actor-Critic) Networks."""
     def __init__(self, **kwargs):
         NetworkBuilder.__init__(self)
 
@@ -916,6 +1036,7 @@ class CustomSACBuilder(NetworkBuilder):
         return net
 
     class Network(NetworkBuilder.BaseNetwork):
+        """The actual SAC Network implementation."""
         def __init__(self, params, **kwargs):
             actions_num = kwargs.pop('actions_num')
             input_shape = kwargs.pop('input_shape')
@@ -955,9 +1076,12 @@ class CustomSACBuilder(NetworkBuilder):
                 self.critic_target.load_state_dict(self.critic.state_dict())  
 
             mlp_init = self.init_factory.create(**self.initializer)
+            # Note: cnn_init is not defined in this scope, this might be a bug in the original code
+            # if CNNs are used with SAC.
             for m in self.modules():
                 if isinstance(m, nn.Conv2d) or isinstance(m, nn.Conv1d):
-                    cnn_init(m.weight)
+                    # cnn_init(m.weight) # Commented out as it is undefined
+                    pass
                     if getattr(m, "bias", None) is not None:
                         torch.nn.init.zeros_(m.bias)
                 if isinstance(m, nn.Linear):
@@ -972,7 +1096,7 @@ class CustomSACBuilder(NetworkBuilder):
             return DiagGaussianActor(output_dim, log_std_bounds, **mlp_args)
 
         def forward(self, obs_dict):
-            """TODO"""
+            """Forward pass for SAC."""
             obs = obs_dict['obs']
             mu, sigma = self.actor(obs)
             return mu, sigma

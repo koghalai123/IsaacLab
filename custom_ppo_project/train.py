@@ -14,22 +14,35 @@ from distutils.util import strtobool
 from isaaclab.app import AppLauncher
 
 # add argparse arguments
+# This section defines the command-line arguments available for the script.
 parser = argparse.ArgumentParser(description="Train an RL agent with RL-Games.")
+# --video: Enable video recording during training.
 parser.add_argument("--video", action="store_true", default=True, help="Record videos during training.")
+# --video_length: Length of each recorded video in steps.
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
+# --video_interval: How often to record a video (in steps).
 parser.add_argument("--video_interval", type=int, default=500, help="Interval between video recordings (in steps).")
+# --num_envs: Number of parallel environments to run.
 parser.add_argument("--num_envs", type=int, default=4096, help="Number of environments to simulate.")
+# --task: The name of the task/environment to train on.
 parser.add_argument("--task", type=str, default="Isaac-Lift-Cube-Franka-v0", help="Name of the task.")
+# --agent: The configuration entry point for the RL agent.
 parser.add_argument(
     "--agent", type=str, default="rl_games_cfg_entry_point", help="Name of the RL agent configuration entry point."
 )
+# --seed: Random seed for reproducibility.
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
+# --distributed: Enable distributed training across multiple GPUs/nodes.
 parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
 )
+# --checkpoint: Path to a checkpoint to resume training from.
 parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint.")
+# --sigma: Initial standard deviation for the policy.
 parser.add_argument("--sigma", type=str, default=None, help="The policy's initial standard deviation.")
+# --max_iterations: Maximum number of training iterations.
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
+# --wandb-*: Arguments for Weights & Biases tracking.
 parser.add_argument("--wandb-project-name", type=str, default=None, help="the wandb's project name")
 parser.add_argument("--wandb-entity", type=str, default=None, help="the entity (team) of wandb's project")
 parser.add_argument("--wandb-name", type=str, default=None, help="the name of wandb's run")
@@ -41,12 +54,14 @@ parser.add_argument(
     const=True,
     help="if toggled, this experiment will be tracked with Weights and Biases",
 )
+# --export_io_descriptors: Export input/output descriptors for the environment.
 parser.add_argument("--export_io_descriptors", action="store_true", default=False, help="Export IO descriptors.")
 parser.add_argument(
     "--ray-proc-id", "-rid", type=int, default=None, help="Automatically configured by Ray integration, otherwise None."
 )
 
 # append AppLauncher cli args
+# AppLauncher handles the initialization of the Isaac Sim application.
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
 args_cli, hydra_args = parser.parse_known_args()
@@ -55,9 +70,11 @@ if args_cli.video:
     args_cli.enable_cameras = True
 
 # clear out sys.argv for Hydra
+# Hydra is used for configuration management, so we need to clear sys.argv to avoid conflicts.
 sys.argv = [sys.argv[0]] + hydra_args
 
 # launch omniverse app
+# Initialize the Isaac Sim application with the parsed arguments.
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
@@ -91,16 +108,19 @@ import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 # Add custom imports
+# Import RL-Games components for registering custom networks and models.
 from rl_games.algos_torch.model_builder import register_network, register_model
 from rl_games.algos_torch import players
 
 # Add local directory to path to import custom modules
+# This ensures that the 'custom_ppo' package can be imported.
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from custom_ppo.custom_agent import CustomPPOAgent
 from custom_ppo.custom_models import CustomModelPPOContinuousLogStd
 from custom_ppo.custom_network_builder import CustomPPOBuilder
 
 # Register custom components
+# Register the custom network builder and model so they can be used by RL-Games.
 register_network('custom_actor_critic', CustomPPOBuilder)
 register_model('custom_continuous_a2c_logstd', CustomModelPPOContinuousLogStd)
 
@@ -114,6 +134,7 @@ logger = logging.getLogger(__name__)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: dict):
     """Train with RL-Games agent."""
     # override configurations with non-hydra CLI arguments
+    # Update the environment configuration with command-line arguments.
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
     # check for invalid combination of CPU device with distributed training
@@ -132,10 +153,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     if args_cli.seed == -1:
         args_cli.seed = random.randint(0, 10000)
 
+    # Set the seed for the agent and environment.
     agent_cfg["params"]["seed"] = args_cli.seed if args_cli.seed is not None else agent_cfg["params"]["seed"]
     agent_cfg["params"]["config"]["max_epochs"] = (
         args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg["params"]["config"]["max_epochs"]
     )
+    # Load checkpoint if provided.
     if args_cli.checkpoint is not None:
         resume_path = retrieve_file_path(args_cli.checkpoint)
         agent_cfg["params"]["load_checkpoint"] = True
@@ -143,9 +166,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print(f"[INFO]: Loading model checkpoint from: {agent_cfg['params']['load_path']}")
     train_sigma = float(args_cli.sigma) if args_cli.sigma is not None else None
 
+    # Set the MLP units for the network.
     agent_cfg["params"]["network"]["mlp"]["units"] = [33, 33, 33]
 
     # multi-gpu training config
+    # Configure distributed training if enabled.
     if args_cli.distributed:
         agent_cfg["params"]["seed"] += app_launcher.global_rank
         agent_cfg["params"]["config"]["device"] = f"cuda:{app_launcher.local_rank}"
@@ -159,6 +184,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.seed = agent_cfg["params"]["seed"]
 
     # specify directory for logging experiments
+    # Determine the directory where logs and checkpoints will be saved.
     config_name = agent_cfg["params"]["config"]["name"]
     log_root_path = os.path.join("logs", "rl_games", config_name)
     if "pbt" in agent_cfg and agent_cfg["pbt"]["directory"] != ".":
@@ -177,11 +203,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     experiment_name = log_dir if args_cli.wandb_name is None else args_cli.wandb_name
 
     # dump the configuration into log-directory
+    # Save the environment and agent configurations to YAML files for reproducibility.
     dump_yaml(os.path.join(log_root_path, log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_root_path, log_dir, "params", "agent.yaml"), agent_cfg)
     print(f"Exact experiment name requested from command line: {os.path.join(log_root_path, log_dir)}")
 
     # read configurations about the agent-training
+    # Extract RL-Games specific configurations.
     rl_device = agent_cfg["params"]["config"]["device"]
     clip_obs = agent_cfg["params"]["env"].get("clip_observations", math.inf)
     clip_actions = agent_cfg["params"]["env"].get("clip_actions", math.inf)
@@ -200,13 +228,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.log_dir = os.path.join(log_root_path, log_dir)
 
     # create isaac environment
+    # Initialize the Gym environment with the specified task and configuration.
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
 
     # convert to single-agent instance if required by the RL algorithm
+    # If the environment is multi-agent but we are using a single-agent algorithm, wrap it.
     if isinstance(env.unwrapped, DirectMARLEnv):
         env = multi_agent_to_single_agent(env)
 
     # wrap for video recording
+    # Add a wrapper to record videos of the agent's performance.
     if args_cli.video:
         video_kwargs = {
             "video_folder": os.path.join(log_root_path, log_dir, "videos", "train"),
@@ -219,10 +250,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
     # wrap around environment for rl-games
+    # Wrap the environment to be compatible with RL-Games.
     env = RlGamesVecEnvWrapper(env, rl_device, clip_obs, clip_actions, obs_groups, concate_obs_groups)
 
     # register the environment to rl-games registry
     # note: in agents configuration: environment name must be "rlgpu"
+    # Register the wrapped environment so RL-Games can create it.
     vecenv.register(
         "IsaacRlgWrapper", lambda config_name, num_actors, **kwargs: RlGamesGpuEnv(config_name, num_actors, **kwargs)
     )
@@ -232,6 +265,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     agent_cfg["params"]["config"]["num_actors"] = env.unwrapped.num_envs
     # create runner from rl-games
 
+    # Initialize the RL-Games runner, which manages the training loop.
     if "pbt" in agent_cfg and agent_cfg["pbt"]["enabled"]:
         observers = MultiObserver([IsaacAlgoObserver(), PbtAlgoObserver(agent_cfg, args_cli)])
         runner = Runner(observers)
@@ -239,10 +273,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         runner = Runner(IsaacAlgoObserver())
 
     # Register custom agent
+    # Register the custom PPO agent and player with the runner.
     runner.algo_factory.register_builder('custom_ppo', lambda **kwargs: CustomPPOAgent(**kwargs))
     runner.player_factory.register_builder('custom_ppo', lambda **kwargs: players.PpoPlayerContinuous(**kwargs))
 
     # Update configuration to use custom components
+    # Force the configuration to use the custom PPO implementation.
     agent_cfg["params"]["algo"]["name"] = "custom_ppo"
     agent_cfg["params"]["model"]["name"] = "custom_continuous_a2c_logstd"
     agent_cfg["params"]["network"]["name"] = "custom_actor_critic"
@@ -253,6 +289,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     runner.reset()
     # train the agent
 
+    # Initialize Weights & Biases tracking if enabled.
     global_rank = int(os.getenv("RANK", "0"))
     if args_cli.track and global_rank == 0:
         if args_cli.wandb_entity is None:
@@ -271,6 +308,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             wandb.config.update({"env_cfg": env_cfg.to_dict()})
             wandb.config.update({"agent_cfg": agent_cfg})
 
+    # Start the training loop.
     if args_cli.checkpoint is not None:
         runner.run({"train": True, "play": False, "sigma": train_sigma, "checkpoint": resume_path})
     else:
