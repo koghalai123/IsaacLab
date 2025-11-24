@@ -25,6 +25,9 @@ class CustomPPOAgent(a2c_common.ContinuousA2CBase):
         """
 
         a2c_common.ContinuousA2CBase.__init__(self, base_name, params)
+        print("----------------------------------------------------------------")
+        print("USING CUSTOM PPO AGENT")
+        print("----------------------------------------------------------------")
         obs_shape = self.obs_shape
         build_config = {
             'actions_num' : self.actions_num,

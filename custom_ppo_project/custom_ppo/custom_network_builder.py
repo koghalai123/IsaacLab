@@ -275,6 +275,7 @@ class CustomPPOBuilder(NetworkBuilder):
                 'norm_only_first_layer' : self.norm_only_first_layer
             }
             self.actor_mlp = self._build_mlp(**mlp_args)
+            print(f"Building Custom MLP with units: {self.units}")
             if self.separate:
                 self.critic_mlp = self._build_mlp(**mlp_args)
 

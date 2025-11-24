@@ -143,7 +143,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print(f"[INFO]: Loading model checkpoint from: {agent_cfg['params']['load_path']}")
     train_sigma = float(args_cli.sigma) if args_cli.sigma is not None else None
 
-    agent_cfg["params"]["network"]["mlp"]["units"] = [4]
+    agent_cfg["params"]["network"]["mlp"]["units"] = [33, 33, 33]
 
     # multi-gpu training config
     if args_cli.distributed:
