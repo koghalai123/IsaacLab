@@ -18,9 +18,6 @@ from rl_games.common.layers.value import TwoHotEncodedValue, DefaultValue
 from rl_games.algos_torch.spatial_softmax import SpatialSoftArgmax
 from rl_games.algos_torch.running_mean_std import RunningMeanStd, RunningMeanStdObs
 
-# --------------------------------------------------------------------------------
-# Network Builder
-# --------------------------------------------------------------------------------
 
 def _create_initializer(func, **kwargs):
     return lambda v : func(v, **kwargs)
@@ -779,13 +776,33 @@ class CustomPPOAgent(a2c_common.ContinuousA2CBase):
         # Call the after_init method of the observer to signal initialization completion.
         self.algo_observer.after_init(self)
 
+        # Early stopping initialization
+        self.early_stopping_patience = self.config.get('early_stopping_patience', 0)
+        self.current_best_reward = -float('inf')
+        self.patience_counter = 0
+
     def update_epoch(self):
-        """Update the epoch counter.
+        """Update the epoch counter and check for early stopping.
         
         Returns:
             int: The new epoch number.
         """
         self.epoch_num += 1
+        
+        if self.early_stopping_patience > 0:
+            # Check if we have a valid reward to compare
+            if hasattr(self, 'last_mean_rewards') and self.last_mean_rewards > -1e9:
+                current_reward = self.last_mean_rewards
+                if current_reward > self.current_best_reward:
+                    self.current_best_reward = current_reward
+                    self.patience_counter = 0
+                else:
+                    self.patience_counter += 1
+                    
+                if self.patience_counter >= self.early_stopping_patience:
+                    print(f"Early stopping triggered after {self.patience_counter} epochs without improvement. Best reward: {self.current_best_reward:.4f}")
+                    self.epoch_num = self.max_epochs # Force stop the training loop
+
         return self.epoch_num
         
     def save(self, fn):

@@ -42,6 +42,10 @@ parser.add_argument("--checkpoint", type=str, default=None, help="Path to model 
 parser.add_argument("--sigma", type=str, default=None, help="The policy's initial standard deviation.")
 # --max_iterations: Maximum number of training iterations.
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
+# --learning_rate: Override the learning rate.
+parser.add_argument("--learning_rate", type=float, default=None, help="Override the learning rate.")
+# --mlp_units: Override the MLP network architecture.
+parser.add_argument("--mlp_units", type=int, nargs="+", default=[33, 33, 33], help="MLP units for the network (e.g. --mlp_units 256 128).")
 # --wandb-*: Arguments for Weights & Biases tracking.
 parser.add_argument("--wandb-project-name", type=str, default=None, help="the wandb's project name")
 parser.add_argument("--wandb-entity", type=str, default=None, help="the entity (team) of wandb's project")
@@ -153,9 +157,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # Set the seed for the agent and environment.
     agent_cfg["params"]["seed"] = args_cli.seed if args_cli.seed is not None else agent_cfg["params"]["seed"]
+    
+    # Set max epochs to 250 by default, or use command line argument
     agent_cfg["params"]["config"]["max_epochs"] = (
-        args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg["params"]["config"]["max_epochs"]
+        args_cli.max_iterations if args_cli.max_iterations is not None else 250
     )
+    
+    # Set early stopping patience (number of epochs without improvement)
+    agent_cfg["params"]["config"]["early_stopping_patience"] = 250
+
     # Load checkpoint if provided.
     if args_cli.checkpoint is not None:
         resume_path = retrieve_file_path(args_cli.checkpoint)
@@ -164,8 +174,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print(f"[INFO]: Loading model checkpoint from: {agent_cfg['params']['load_path']}")
     train_sigma = float(args_cli.sigma) if args_cli.sigma is not None else None
 
+    # Override learning rate if provided
+    if args_cli.learning_rate is not None:
+        agent_cfg["params"]["config"]["learning_rate"] = args_cli.learning_rate
+
     # Set the MLP units for the network.
-    agent_cfg["params"]["network"]["mlp"]["units"] = [33, 33, 33]
+    agent_cfg["params"]["network"]["mlp"]["units"] = args_cli.mlp_units
 
     # multi-gpu training config
     # Configure distributed training if enabled.
@@ -313,7 +327,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         runner.run({"train": True, "play": False, "sigma": train_sigma})
 
     # close the simulator
-    env.close()
+    try:
+        env.close()
+    except Exception as e:
+        print(f"Warning: Error closing environment: {e}")
 
 
 if __name__ == "__main__":
