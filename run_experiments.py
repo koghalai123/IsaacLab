@@ -21,9 +21,9 @@ algorithms = {
     "ppo": "custom_ppo_project/ppo_params.yaml",
     "sac": "custom_ppo_project/sac_params.yaml",
 }
-learning_rates = [1e-3, 1e-4]
+learning_rates = [0.0001]#[1e-3, 1e-4]
 mlp_architectures = [
-    [64, 64],
+#    [64, 64],
     [128, 128],
 ]
 seeds = [42] # Add more seeds for robustness: [42, 100, 123]
