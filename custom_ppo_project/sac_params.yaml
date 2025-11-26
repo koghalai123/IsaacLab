@@ -1,0 +1,54 @@
+params:
+  seed: 42
+  algo:
+    name: sac
+
+  model:
+    name: soft_actor_critic
+
+  network:
+    name: soft_actor_critic
+    separate: True
+    space:
+      continuous:
+        mu_activation: None
+        sigma_activation: None
+        mu_init:
+          name: default
+        sigma_init:
+          name: const_initializer
+          val: 0
+        fixed_sigma: True
+    mlp:
+      units: [256, 128, 64]
+      activation: relu
+      initializer:
+        name: default
+    log_std_bounds: [-5, 2]
+
+  config:
+    name: Isaac-Lift-Cube-Franka-SAC
+    env_name: rlgpu
+    normalize_input: True
+    reward_shaper:
+      scale_value: 1.0
+    device: cuda
+    max_epochs: 2000
+    num_steps_per_episode: 64 # Horizon length equivalent
+    save_best_after: 100
+    save_frequency: 50
+    gamma: 0.99
+    init_alpha: 1.0
+    alpha_lr: 0.005
+    actor_lr: 0.0005
+    critic_lr: 0.0005
+    critic_tau: 0.005
+    batch_size: 4096
+    learnable_temperature: True
+    num_warmup_steps: 10
+    replay_buffer_size: 100000
+    num_actors: 4096 # Will be overridden by env
+
+  env:
+    clip_observations: 5.0
+    clip_actions: 1.0

@@ -7,9 +7,10 @@
 
 """Launch Isaac Sim Simulator first."""
 
-import argparse
 import sys
-from distutils.util import strtobool
+import yaml
+import argparse
+from datetime import datetime
 
 from isaaclab.app import AppLauncher
 
@@ -38,6 +39,8 @@ parser.add_argument(
 )
 # --checkpoint: Path to a checkpoint to resume training from.
 parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint.")
+# --agent_cfg_path: Path to agent configuration file.
+parser.add_argument("--agent_cfg_path", type=str, default=None, help="Path to agent configuration file (overrides hydra config).")
 # --sigma: Initial standard deviation for the policy.
 parser.add_argument("--sigma", type=str, default=None, help="The policy's initial standard deviation.")
 # --max_iterations: Maximum number of training iterations.
@@ -89,7 +92,6 @@ import logging
 import math
 import os
 import random
-from datetime import datetime
 
 from rl_games.common import env_configurations, vecenv
 from rl_games.common.algo_observer import IsaacAlgoObserver
@@ -135,6 +137,12 @@ logger = logging.getLogger(__name__)
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: dict):
     """Train with RL-Games agent."""
+    # Load agent config from file if provided
+    if args_cli.agent_cfg_path is not None:
+        print(f"[INFO] Loading agent configuration from: {args_cli.agent_cfg_path}")
+        with open(args_cli.agent_cfg_path, 'r') as f:
+            agent_cfg = yaml.safe_load(f)
+
     # override configurations with non-hydra CLI arguments
     # Update the environment configuration with command-line arguments.
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
@@ -290,10 +298,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     runner.player_factory.register_builder('custom_ppo', lambda **kwargs: players.PpoPlayerContinuous(**kwargs))
 
     # Update configuration to use custom components
-    # Force the configuration to use the custom PPO implementation.
-    agent_cfg["params"]["algo"]["name"] = "custom_ppo"
-    agent_cfg["params"]["model"]["name"] = "custom_continuous_a2c_logstd"
-    agent_cfg["params"]["network"]["name"] = "custom_actor_critic"
+    # Only force custom PPO if not explicitly using another algo via config file
+    current_algo_name = agent_cfg["params"]["algo"].get("name")
+    
+    if args_cli.agent_cfg_path is None and current_algo_name != "sac":
+        # Default behavior: Force custom PPO
+        agent_cfg["params"]["algo"]["name"] = "custom_ppo"
+        agent_cfg["params"]["model"]["name"] = "custom_continuous_a2c_logstd"
+        agent_cfg["params"]["network"]["name"] = "custom_actor_critic"
+    elif current_algo_name == "custom_ppo":
+        # If config explicitly asks for custom_ppo, ensure components are set
+        agent_cfg["params"]["model"]["name"] = "custom_continuous_a2c_logstd"
+        agent_cfg["params"]["network"]["name"] = "custom_actor_critic"
 
     runner.load(agent_cfg)
 
