@@ -20,21 +20,21 @@ params:
           val: 0
         fixed_sigma: True
     mlp:
-      units: [256, 128, 64]
-      activation: relu
+      units: [256, 128]
+      activation: elu
       initializer:
         name: default
     log_std_bounds: [-5, 2]
 
   config:
-    name: Isaac-Lift-Cube-Franka-SAC
+    name: franka_lift_sac
     env_name: rlgpu
     normalize_input: True
     reward_shaper:
-      scale_value: 1.0
-    device: cuda
-    max_epochs: 2000
-    num_steps_per_episode: 64 # Horizon length equivalent
+      scale_value: 0.01
+    device: cuda:0
+    max_epochs: 250
+    num_steps_per_episode: 24
     save_best_after: 100
     save_frequency: 50
     gamma: 0.99
@@ -47,8 +47,8 @@ params:
     learnable_temperature: True
     num_warmup_steps: 10
     replay_buffer_size: 100000
-    num_actors: 4096 # Will be overridden by env
+    num_actors: -1
 
   env:
-    clip_observations: 5.0
-    clip_actions: 1.0
+    clip_observations: 100.0
+    clip_actions: 100.0

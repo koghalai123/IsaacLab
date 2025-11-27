@@ -24,7 +24,7 @@ algorithms = {
 learning_rates = [0.0001]#[1e-3, 1e-4]
 mlp_architectures = [
 #    [64, 64],
-    [128, 128],
+    [256, 128, 64],
 ]
 seeds = [42] # Add more seeds for robustness: [42, 100, 123]
 
@@ -62,7 +62,7 @@ def run_experiments():
                         "--seed", str(seed),
                         "--headless", # Run without GUI
                         "--video", # Record video (optional, remove if not needed)
-                        "--max_iterations", "250" # Ensure short runs for testing
+                        "--max_iterations", "1000" # Ensure short runs for testing
                     ]
                 
                 if WANDB_ENTITY:
