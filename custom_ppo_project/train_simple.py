@@ -203,6 +203,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # note: certain randomizations occur in the environment initialization so we set the seed here
     env_cfg.seed = agent_cfg["params"]["seed"]
 
+    # Override config name with task name so logs go to the correct folder
+    if args_cli.task is not None:
+        agent_cfg["params"]["config"]["name"] = args_cli.task
+
     # specify directory for logging experiments
     # Determine the directory where logs and checkpoints will be saved.
     config_name = agent_cfg["params"]["config"]["name"]
@@ -247,6 +251,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # set the log directory for the environment (works for all environment types)
     env_cfg.log_dir = os.path.join(log_root_path, log_dir)
 
+    # Force concatenation of policy observations for rl-games if applicable
+    # This is required because rl-games expects a single flat vector for observations
+    if hasattr(env_cfg, "observations") and hasattr(env_cfg.observations, "policy"):
+        env_cfg.observations.policy.concatenate_terms = True
+    
+    # Also check for 'critic' group which might be used for states
+    if hasattr(env_cfg, "observations") and hasattr(env_cfg.observations, "critic"):
+        env_cfg.observations.critic.concatenate_terms = True
+
     # create isaac environment
     # Initialize the Gym environment with the specified task and configuration.
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
@@ -271,6 +284,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # wrap around environment for rl-games
     # Wrap the environment to be compatible with RL-Games.
+    # Ensure obs_groups is not None for Stack task which might have different observation structure
+    if obs_groups is None:
+        # Default observation groups if not specified in config
+        # Note: rl_games wrapper expects "states" key even if empty for asymmetric actor-critic checks
+        obs_groups = {"obs": ["policy"], "states": ["critic"] if "critic" in env.unwrapped.single_observation_space.keys() else []}
+        
     env = RlGamesVecEnvWrapper(env, rl_device, clip_obs, clip_actions, obs_groups, concate_obs_groups)
 
     # register the environment to rl-games registry
