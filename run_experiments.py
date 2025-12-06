@@ -13,16 +13,17 @@ PYTHON_EXEC = sys.executable
 TRAIN_SCRIPT = "custom_ppo_project/train_simple.py"
 
 # WandB Settings
-WANDB_PROJECT = "isaac_lab_experiments"
+WANDB_PROJECT = "isaac_lab_experiments3"
 WANDB_ENTITY = "koghalai-uc-davis"  # Set this to your WandB username/team if needed, or pass via CLI
 
 # Define the grid of hyperparameters to search over
 algorithms = {
-    "ppo_baseline": "custom_ppo_project/ppo_params.yaml",
+    
     "ppo_frozen_critic": "custom_ppo_project/ppo_frozen_critic.yaml",  # critic_coef=0, tau=1.0
     "ppo_lambda_zero": "custom_ppo_project/ppo_lambda_zero.yaml",      # tau=0 (pure TD)
     "ppo_gamma_zero": "custom_ppo_project/ppo_gamma_zero.yaml",        # gamma=0 (no future)
     "ppo_no_clipping": "custom_ppo_project/ppo_no_clipping.yaml",      # e_clip=1000
+    "ppo_baseline": "custom_ppo_project/ppo_params.yaml",
 #    "sac": "custom_ppo_project/sac_params.yaml",
 }
 learning_rates = [0.0001]#[1e-3, 1e-4]
@@ -30,12 +31,11 @@ mlp_architectures = [
 #    [64, 64],
     [256, 128, 64],
 ]
-seeds = [42, 100, 123] # Multiple seeds for robustness
+seeds = [1,2,3,4,5] # Multiple seeds for robustness
 tasks = [
-    #"Isaac-Stack-Cube-Franka-v0",
-    "Isaac-Factory-PegInsert-Direct-v0",
-#    "Isaac-Open-Drawer-Franka-v0",
-#    "Isaac-Lift-Cube-Franka-v0",
+    #"Isaac-Factory-PegInsert-Direct-v0",
+    "Isaac-Open-Drawer-Franka-v0",
+    "Isaac-Lift-Cube-Franka-v0",
 ]
 
 # -----------------------------------------------------------------------------
@@ -90,7 +90,7 @@ def run_experiments():
                             "--seed", str(seed),
                             "--headless", # Run without GUI
                             "--video", # Record video (optional, remove if not needed)
-                            "--max_iterations", "1000" # Ensure short runs for testing
+                            "--max_iterations", "500" # Ensure short runs for testing
                         ]
                         
                         if WANDB_ENTITY:
